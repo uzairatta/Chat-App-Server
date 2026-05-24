@@ -9,9 +9,6 @@ import Redis from "ioredis";
 import cron from "node-cron";
 import Room from "./models/messages.js";
 
-console.log("MONGODB_URI:", process.env.MONGODB_URI);
-console.log("REDIS_URL:", process.env.REDIS_URL);
-
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -31,21 +28,23 @@ const redis = new Redis(process.env.REDIS_URL);
 io.on("connection", (socket) => {
   console.log("a user connected", socket.id);
 
-  socket.on("join", async (roomId) => {
-    socket.join(roomId);
-    const room = await Room.findOne({ roomId });
-    if (room) {
-      socket.emit("previousMessages", room.messages);
+  socket.on("join", async ({ username, room }) => {
+    socket.join(room);
+    console.log(`${username} joined room: ${room}`);
+    const roomDoc = await Room.findOne({ roomId: room });
+    if (roomDoc) {
+      socket.emit("previousMessages", roomDoc.messages);
     }
   });
 
-  socket.on("leave", (roomId) => {
-    socket.leave(roomId);
+  socket.on("leave", ({ username, room }) => {
+    socket.leave(room);
+    console.log(`${username} left room: ${room}`);
   });
 
   socket.on("send", async (message) => {
     console.log(message);
-    io.to(message.room).emit("message", message);
+    socket.broadcast.to(message.room).emit("message", message);
     const key = `room:${message.room}`;
     await redis.rpush(key, JSON.stringify({
       senderName: message.username,
@@ -54,7 +53,12 @@ io.on("connection", (socket) => {
     }));
     await redis.expire(key, 5400);
   });
-});
+
+  socket.on("disconnect", () => {
+    console.log("user disconnected", socket.id);
+  });
+
+}); 
 
 cron.schedule("* * * * *", async () => {
   console.log("Running cron job - syncing Redis to MongoDB");
@@ -69,6 +73,7 @@ cron.schedule("* * * * *", async () => {
       { $push: { messages: { $each: parsedMessages } } },
       { upsert: true, new: true }
     );
+    await redis.del(key);
     console.log(`Synced ${parsedMessages.length} messages for room: ${roomId}`);
   }
 });
