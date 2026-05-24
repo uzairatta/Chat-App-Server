@@ -58,7 +58,7 @@ io.on("connection", (socket) => {
     console.log("user disconnected", socket.id);
   });
 
-}); 
+}); // ← closing io.on("connection")
 
 cron.schedule("* * * * *", async () => {
   console.log("Running cron job - syncing Redis to MongoDB");
